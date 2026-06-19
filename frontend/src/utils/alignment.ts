@@ -168,17 +168,25 @@ export function calculateGCContent(seq: string, windowSize = 50): GCContent[] {
 /**
  * Calculate pairwise distance matrix from sequences
  */
-export function calculateDistanceMatrix(sequences: { name: string; data: string }[]): number[][] {
+export function calculateDistanceMatrix(
+  sequences: { name: string; data: string }[],
+  onProgress?: (current: number, total: number) => void
+): number[][] {
   const n = sequences.length;
+  const totalPairs = (n * (n - 1)) / 2;
   const matrix: number[][] = Array.from({ length: n }, () => new Array(n).fill(0));
 
+  let completed = 0;
   for (let i = 0; i < n; i++) {
     for (let j = i + 1; j < n; j++) {
       const result = needlemanWunsch(sequences[i].data, sequences[j].data);
-      // Distance = 1 - (identity / 100)
       const distance = 1 - result.identity / 100;
       matrix[i][j] = distance;
       matrix[j][i] = distance;
+      completed++;
+      if (onProgress) {
+        onProgress(completed, totalPairs);
+      }
     }
   }
 
@@ -188,7 +196,11 @@ export function calculateDistanceMatrix(sequences: { name: string; data: string 
 /**
  * Simple Neighbor-Joining algorithm to build a phylogenetic tree
  */
-export function buildNJTree(distMatrix: number[][], names: string[]): PhyloNode {
+export function buildNJTree(
+  distMatrix: number[][],
+  names: string[],
+  onProgress?: (current: number, total: number) => void
+): PhyloNode {
   const n = names.length;
 
   if (n === 0) {
@@ -209,20 +221,20 @@ export function buildNJTree(distMatrix: number[][], names: string[]): PhyloNode 
     };
   }
 
-  // Work with mutable copies
   let dist: number[][] = distMatrix.map(row => [...row]);
   let nodes: PhyloNode[] = names.map(name => ({ name, branchLength: 0, children: [] }));
   let active = Array.from({ length: n }, (_, i) => i);
 
+  const totalSteps = n - 2;
+  let step = 0;
+
   while (active.length > 2) {
     const size = active.length;
 
-    // Calculate Q matrix
     let minQ = Infinity;
     let minI = 0;
     let minJ = 1;
 
-    // Row sums for active indices
     const rowSum: number[] = new Array(size).fill(0);
     for (let ai = 0; ai < size; ai++) {
       for (let aj = 0; aj < size; aj++) {
@@ -246,12 +258,10 @@ export function buildNJTree(distMatrix: number[][], names: string[]): PhyloNode 
     const idxI = active[minI];
     const idxJ = active[minJ];
 
-    // Calculate branch lengths
     const dIJ = dist[idxI][idxJ];
     const branchI = dIJ / 2 + (rowSum[minI] - rowSum[minJ]) / (2 * (size - 2));
     const branchJ = dIJ - branchI;
 
-    // Create new node
     const newNode: PhyloNode = {
       name: `(${nodes[idxI].name},${nodes[idxJ].name})`,
       branchLength: 0,
@@ -261,7 +271,6 @@ export function buildNJTree(distMatrix: number[][], names: string[]): PhyloNode 
       ]
     };
 
-    // Update distance matrix (add new row/column)
     const newIdx = dist.length;
     const newRow: number[] = new Array(newIdx + 1).fill(0);
     for (let k = 0; k < newIdx; k++) {
@@ -271,7 +280,6 @@ export function buildNJTree(distMatrix: number[][], names: string[]): PhyloNode 
       }
     }
 
-    // Expand matrix
     for (let r = 0; r < dist.length; r++) {
       dist[r].push(newRow[r] || 0);
     }
@@ -279,12 +287,15 @@ export function buildNJTree(distMatrix: number[][], names: string[]): PhyloNode 
 
     nodes.push(newNode);
 
-    // Update active list
     active = active.filter(a => a !== idxI && a !== idxJ);
     active.push(newIdx);
+
+    step++;
+    if (onProgress) {
+      onProgress(step, totalSteps);
+    }
   }
 
-  // Join last two nodes
   if (active.length === 2) {
     const lastDist = dist[active[0]][active[1]] / 2;
     return {

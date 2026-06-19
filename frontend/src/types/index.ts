@@ -29,3 +29,12 @@ export interface GCContent {
   position: number;
   gc: number;
 }
+
+export type TreeBuildStatus = 'idle' | 'calculating' | 'building' | 'success' | 'error';
+
+export interface TreeBuildProgress {
+  status: TreeBuildStatus;
+  progress: number;
+  message: string;
+  error: string | null;
+}

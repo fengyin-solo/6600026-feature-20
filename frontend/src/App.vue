@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { useSequenceStore } from './store/sequence';
 import AlignmentView from './components/AlignmentView.vue';
 import PhyloTree from './components/PhyloTree.vue';
@@ -10,7 +10,10 @@ const gcSeqId = ref('');
 const gcWindowSize = ref(50);
 const newSeqName = ref('');
 const newSeqData = ref('');
-const isBuildingTree = ref(false);
+
+const isTreeBuilding = computed(() => {
+  return store.treeBuildProgress.status === 'calculating' || store.treeBuildProgress.status === 'building';
+});
 
 onMounted(() => {
   store.loadMockSequences();
@@ -35,14 +38,12 @@ function handleAnalyzeGC() {
 
 function handleBuildTree() {
   if (store.sequences.length < 2) {
-    alert('至少需要2条序列');
     return;
   }
-  isBuildingTree.value = true;
-  setTimeout(() => {
-    store.buildTree();
-    isBuildingTree.value = false;
-  }, 100);
+  if (isTreeBuilding.value) {
+    return;
+  }
+  store.buildTree();
 }
 
 function handleAddSequence() {
@@ -256,13 +257,50 @@ function handleLoadMock() {
           <h2 class="text-sm font-semibold text-gray-300">系统发育树</h2>
           <button
             @click="handleBuildTree"
-            :disabled="isBuildingTree || store.sequences.length < 2"
+            :disabled="isTreeBuilding || store.sequences.length < 2"
             class="px-4 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-sm rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {{ isBuildingTree ? '构建中...' : '构建进化树' }}
+            <span v-if="isTreeBuilding" class="flex items-center gap-2">
+              <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              构建中...
+            </span>
+            <span v-else-if="store.treeBuildProgress.status === 'success'">重新构建</span>
+            <span v-else>构建进化树</span>
           </button>
         </div>
-        <div class="p-4">
+        <div class="p-4 space-y-3">
+          <!-- Progress Bar -->
+          <div v-if="isTreeBuilding || store.treeBuildProgress.status === 'success'" class="space-y-1">
+            <div class="flex items-center justify-between text-xs">
+              <span class="text-gray-400">{{ store.treeBuildProgress.message }}</span>
+              <span class="text-gray-400">{{ store.treeBuildProgress.progress }}%</span>
+            </div>
+            <div class="w-full bg-gray-700 rounded-full h-2 overflow-hidden">
+              <div
+                class="h-full rounded-full transition-all duration-300"
+                :class="store.treeBuildProgress.status === 'success' ? 'bg-emerald-500' : 'bg-purple-500'"
+                :style="{ width: store.treeBuildProgress.progress + '%' }"
+              ></div>
+            </div>
+          </div>
+
+          <!-- Error Message -->
+          <div
+            v-if="store.treeBuildProgress.status === 'error' && store.treeBuildProgress.error"
+            class="px-3 py-2 bg-red-900/30 border border-red-700 rounded text-sm text-red-400 flex items-center justify-between"
+          >
+            <span>{{ store.treeBuildProgress.error }}</span>
+            <button
+              @click="store.resetTreeBuild()"
+              class="text-xs text-red-300 hover:text-red-200 underline"
+            >
+              关闭
+            </button>
+          </div>
+
           <PhyloTree :tree="store.phyloTree" />
         </div>
       </section>

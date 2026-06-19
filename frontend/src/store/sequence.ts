@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
-import type { Sequence, AlignmentResult, GCContent, PhyloNode } from '../types';
+import type { Sequence, AlignmentResult, GCContent, PhyloNode, TreeBuildProgress } from '../types';
 import {
   needlemanWunsch,
   smithWaterman,
@@ -18,6 +18,12 @@ export const useSequenceStore = defineStore('sequence', () => {
   const phyloTree = ref<PhyloNode | null>(null);
   const selectedSeq1 = ref<string>('');
   const selectedSeq2 = ref<string>('');
+  const treeBuildProgress = ref<TreeBuildProgress>({
+    status: 'idle',
+    progress: 0,
+    message: '',
+    error: null
+  });
 
   const alignmentIdentity = computed(() => {
     return alignmentResult.value ? alignmentResult.value.identity : 0;
@@ -64,13 +70,90 @@ export const useSequenceStore = defineStore('sequence', () => {
     selectedSeq2.value = MOCK_SEQUENCES[1].id;
   }
 
-  function buildTree() {
-    if (sequences.value.length < 2) return;
+  async function buildTree() {
+    if (sequences.value.length < 2) {
+      treeBuildProgress.value = {
+        status: 'error',
+        progress: 0,
+        message: '',
+        error: '至少需要2条序列才能构建进化树'
+      };
+      return;
+    }
 
-    const seqData = sequences.value.map(s => ({ name: s.name, data: s.data }));
-    const distMatrix = calculateDistanceMatrix(seqData);
-    const names = sequences.value.map(s => s.name);
-    phyloTree.value = buildNJTree(distMatrix, names);
+    if (treeBuildProgress.value.status === 'calculating' || treeBuildProgress.value.status === 'building') {
+      return;
+    }
+
+    treeBuildProgress.value = {
+      status: 'calculating',
+      progress: 0,
+      message: '正在计算距离矩阵...',
+      error: null
+    };
+
+    try {
+      await new Promise(resolve => setTimeout(resolve, 20));
+
+      const seqData = sequences.value.map(s => ({ name: s.name, data: s.data }));
+
+      const distMatrix = calculateDistanceMatrix(seqData, (current, total) => {
+        const progress = Math.round((current / total) * 60);
+        treeBuildProgress.value = {
+          status: 'calculating',
+          progress,
+          message: `正在计算距离矩阵... (${current}/${total})`,
+          error: null
+        };
+      });
+
+      treeBuildProgress.value = {
+        status: 'building',
+        progress: 60,
+        message: '正在构建进化树...',
+        error: null
+      };
+
+      await new Promise(resolve => setTimeout(resolve, 20));
+
+      const names = sequences.value.map(s => s.name);
+      const totalSteps = Math.max(names.length - 2, 1);
+
+      phyloTree.value = buildNJTree(distMatrix, names, (current, total) => {
+        const progress = 60 + Math.round((current / total) * 40);
+        treeBuildProgress.value = {
+          status: 'building',
+          progress,
+          message: `正在构建进化树... (${current}/${total})`,
+          error: null
+        };
+      });
+
+      treeBuildProgress.value = {
+        status: 'success',
+        progress: 100,
+        message: '进化树构建完成',
+        error: null
+      };
+    } catch (e) {
+      const errorMsg = e instanceof Error ? e.message : '未知错误';
+      treeBuildProgress.value = {
+        status: 'error',
+        progress: 0,
+        message: '',
+        error: `构建进化树失败: ${errorMsg}`
+      };
+      phyloTree.value = null;
+    }
+  }
+
+  function resetTreeBuild() {
+    treeBuildProgress.value = {
+      status: 'idle',
+      progress: 0,
+      message: '',
+      error: null
+    };
   }
 
   function analyzeGC(seqId: string, windowSize: number) {
@@ -87,6 +170,7 @@ export const useSequenceStore = defineStore('sequence', () => {
     phyloTree,
     selectedSeq1,
     selectedSeq2,
+    treeBuildProgress,
     alignmentIdentity,
     alignmentScore,
     addSequence,
@@ -94,6 +178,7 @@ export const useSequenceStore = defineStore('sequence', () => {
     runAlignment,
     loadMockSequences,
     buildTree,
+    resetTreeBuild,
     analyzeGC
   };
 });
